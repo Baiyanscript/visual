@@ -110,25 +110,25 @@ bringBtn.TextSize = 15
 bringBtn.TextColor3 = Color3.fromRGB(120,255,120)
 
 -- ===== MOZIL =====
-local mozilFrame = Instance.new("Frame", bottom)
-mozilFrame.Size = UDim2.new(0.48,0,1,0)
-mozilFrame.Position = UDim2.new(0.52,0,0,0)
-mozilFrame.BackgroundColor3 = Color3.fromRGB(5,35,5)
-Instance.new("UICorner", mozilFrame).CornerRadius = UDim.new(0,10)
+local BaiyanFrame = Instance.new("Frame", bottom)
+BaiyanFrame.Size = UDim2.new(0.48,0,1,0)
+BaiyanFrame.Position = UDim2.new(0.52,0,0,0)
+BaiyanFrame.BackgroundColor3 = Color3.fromRGB(5,35,5)
+Instance.new("UICorner", BaiyanFrame).CornerRadius = UDim.new(0,10)
 
-local mozilBtn = Instance.new("TextButton", mozilFrame)
-mozilBtn.Size = UDim2.new(1,0,1,0)
-mozilBtn.BackgroundTransparency = 1
-mozilBtn.Font = Enum.Font.GothamBold
-mozilBtn.Text = "Baiyan Auto Donate"
-mozilBtn.TextSize = 15
-mozilBtn.TextColor3 = Color3.fromRGB(180,255,180)
+local BaiyanBtn = Instance.new("TextButton", BaiyanFrame)
+BaiyanBtn.Size = UDim2.new(1,0,1,0)
+BaiyanBtn.BackgroundTransparency = 1
+BaiyanBtn.Font = Enum.Font.GothamBold
+BaiyanBtn.Text = "Baiyan Auto Donate"
+BaiyanBtn.TextSize = 15
+BaiyanBtn.TextColor3 = Color3.fromRGB(180,255,180)
 
 -- ===== TOGGLE LOGO =====
 local toggle = Instance.new("ImageButton", screenGui)
 toggle.Size = UDim2.new(0,56,0,56)
 toggle.Position = UDim2.new(0.02,0,0.4,0)
-toggle.Image = "rbxassetid://117995088410104"
+toggle.Image = "rbxassetid://70869600792415"
 toggle.BackgroundColor3 = Color3.fromRGB(5,15,5)
 toggle.AutoButtonColor = false
 Instance.new("UICorner", toggle).CornerRadius = UDim.new(1,0)
@@ -190,11 +190,11 @@ toggle.MouseButton1Click:Connect(function()
     main.Visible = not main.Visible
 end)
 
--- ===== MOZIL SCRIPT =====
-local MOZIL_URL = "https://raw.githubusercontent.com/Baiyanscript/visual/refs/heads/main/BaiyanscriptV4"
+-- ===== Baiyan SCRIPT =====
+local Baiyan_URL = "https://raw.githubusercontent.com/Baiyanscript/visual/refs/heads/main/Pls-Donate"
 
-mozilBtn.MouseButton1Click:Connect(function()
+BaiyanBtn.MouseButton1Click:Connect(function()
     pcall(function()
-        loadstring(game:HttpGet(MOZIL_URL))()
+        loadstring(game:HttpGet(Baiyan_URL))()
     end)
 end)
