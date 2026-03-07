@@ -1,0 +1,730 @@
+local Players         = game:GetService("Players")
+local LocalPlayer     = Players.LocalPlayer
+local PlayerGui       = LocalPlayer:WaitForChild("PlayerGui")
+local TweenService    = game:GetService("TweenService")
+local SoundService    = game:GetService("SoundService")
+local Debris          = game:GetService("Debris")
+local RunService      = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
+local UserInputService = game:GetService("UserInputService")
+
+
+local PUSH_FIRST        = true
+local PUSH_DURATION     = 6
+local PUSH_INTERVAL     = 0.05
+local NEAR_RADIUS       = 0.2
+local SPAWN_DELAY       = 0.1
+local MAX_VALUE         = 15000
+local NUM_PER_PLAYER    = 1
+
+
+local totalDonatedVisual = 0
+
+
+
+local UITemplates = PlayerGui:FindFirstChild("UITemplates")
+local DONATION_TEMPLATE
+local POPUPS_FOLDER
+
+do
+    if UITemplates and UITemplates:FindFirstChild("donationPopup") then
+        DONATION_TEMPLATE = UITemplates:FindFirstChild("donationPopup")
+    end
+
+    local existingGui
+    for _, child in ipairs(PlayerGui:GetChildren()) do
+        if child:IsA("ScreenGui") and child:FindFirstChild("Popups", true) then
+            existingGui = child
+            break
+        end
+    end
+
+    if DONATION_TEMPLATE and existingGui then
+        POPUPS_FOLDER = existingGui:FindFirstChild("Popups", true)
+    end
+
+    if not DONATION_TEMPLATE then
+        local templateGui = existingGui
+        if not templateGui then
+            templateGui = Instance.new("ScreenGui")
+            templateGui.Name = "BaiyanDonateTemplateGui"
+            templateGui.ResetOnSpawn = false
+            templateGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+            templateGui.Parent = PlayerGui
+        end
+
+        local popupFrame = Instance.new("Frame")
+        popupFrame.Name = "donationPopup"
+        popupFrame.AnchorPoint = Vector2.new(0.5, 0)
+        popupFrame.Position = UDim2.new(0.5, 0, 0.1, 0)
+        popupFrame.Size = UDim2.new(0, 350, 0, 60)
+        popupFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        popupFrame.BackgroundTransparency = 0.1
+        popupFrame.BorderSizePixel = 0
+        popupFrame.Parent = templateGui
+
+        local popupCorner = Instance.new("UICorner")
+        popupCorner.CornerRadius = UDim.new(0, 10)
+        popupCorner.Parent = popupFrame
+
+        local messageLabel = Instance.new("TextLabel")
+        messageLabel.Name = "Message"
+        messageLabel.BackgroundTransparency = 1
+        messageLabel.Position = UDim2.new(0, 10, 0, 10)
+        messageLabel.Size = UDim2.new(1, -20, 1, -20)
+        messageLabel.Font = Enum.Font.GothamBold
+        messageLabel.Text = ""
+        messageLabel.TextColor3 = Color3.new(1, 1, 1)
+        messageLabel.TextSize = 20
+        messageLabel.TextWrapped = true
+        messageLabel.TextXAlignment = Enum.TextXAlignment.Left
+        messageLabel.Parent = popupFrame
+
+        local uiScale = Instance.new("UIScale")
+        uiScale.Parent = popupFrame
+
+        DONATION_TEMPLATE = popupFrame
+    end
+
+    if not POPUPS_FOLDER then
+        local popGui = Instance.new("ScreenGui")
+        popGui.Name = "BaiyanDonatePopups"
+        popGui.ResetOnSpawn = false
+        popGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        popGui.Parent = PlayerGui
+
+        POPUPS_FOLDER = Instance.new("Folder")
+        POPUPS_FOLDER.Name = "Popups"
+        POPUPS_FOLDER.Parent = popGui
+    end
+end
+
+
+local function formatNumber(n)
+    local s = tostring(n)
+    s = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+    if s:sub(1, 1) == "," then
+        s = s:sub(2)
+    end
+    return s
+end
+
+local SPECIAL_SMALL = {
+    1,
+    2,
+    5,
+    10,
+    15,
+    20,
+    50,
+    75
+}
+local function nearestSpecialSmall(v)
+    local best = SPECIAL_SMALL[1]
+    local bestDiff = math.huge
+    for _, x in ipairs(SPECIAL_SMALL) do
+        local d = math.abs(v - x)
+        if d < bestDiff then
+            best = x
+            bestDiff = d
+        end
+    end
+    return best
+end
+
+local FAVOR_MED = {
+    {
+        val = 100,
+        w = 60
+    },
+    {
+        val = 200,
+        w = 35
+    },
+    {
+        val = 500,
+        w = 25
+    }
+}
+local FAVOR_MED_TOTAL = 0
+for _, it in ipairs(FAVOR_MED) do
+    FAVOR_MED_TOTAL += it.w
+end
+local function pickFavorMed()
+    local r = math.random(1, FAVOR_MED_TOTAL)
+    local acc = 0
+    for _, it in ipairs(FAVOR_MED) do
+        acc += it.w
+        if r <= acc then
+            return it.val
+        end
+    end
+    return 100
+end
+local function roundAmount(v)
+    if v < 100 then
+        return nearestSpecialSmall(v)
+    elseif v < 1000 then
+        if math.random() <= 0.8 then
+            return pickFavorMed()
+        else
+            return math.floor((v + 50) / 100) * 100
+        end
+    else
+        local rounded = math.floor((v + 500) / 1000) * 1000
+        return math.clamp(rounded, 1000, MAX_VALUE)
+    end
+end
+local function weightedRandomAmount(maxValue)
+    local roll = math.random(1, 10000)
+    if roll <= 9500 then
+        local raw = math.floor((1 - math.random() ^ 2.6) * 1000) + 1
+        return roundAmount(raw)
+    else
+        local over10k = ({
+            11000,
+            12000,
+            13000,
+            14000,
+            15000
+        })[math.random(1, 5)]
+        return math.min(over10k, maxValue)
+    end
+end
+local function playAmountSound(amount)
+    local soundId
+    if amount <= 99 then
+        soundId = "rbxassetid://15333945695"
+    elseif amount <= 999 then
+        soundId = "rbxassetid://15333946014"
+    elseif amount <= 9999 then
+        soundId = "rbxassetid://15333945376"
+    else
+        soundId = "rbxassetid://15333945889"
+    end
+    local s = Instance.new("Sound")
+    s.SoundId = soundId
+    s.Volume = 1
+    s.Parent = SoundService
+    s:Play()
+    Debris:AddItem(s, 6)
+end
+
+local function createDonationVisual(username, amount)
+    local text = username .. " DONATED " .. formatNumber(amount) .. " TO YOU!"
+    local clone = DONATION_TEMPLATE:Clone()
+    clone.Parent = POPUPS_FOLDER
+    clone.Transparency = 1
+    clone.Visible = true
+    if clone:FindFirstChild("Message") then
+        clone.Message.Text = text
+        pcall(function()
+            clone.Message.MaxVisibleGraphemes = 0
+        end)
+    end
+    if clone:FindFirstChild("UIScale") then
+        clone.UIScale.Scale = 0
+    end
+    TweenService:Create(clone, TweenInfo.new(0.5, Enum.EasingStyle.Quint), {
+        Transparency = 0
+    }):Play()
+    if clone:FindFirstChild("UIScale") then
+        TweenService:Create(clone.UIScale, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
+            Scale = 1
+        }):Play()
+    end
+    if clone:FindFirstChild("Message") then
+        TweenService:Create(clone.Message, TweenInfo.new(1, Enum.EasingStyle.Quint), {
+            MaxVisibleGraphemes = #text
+        }):Play()
+    end
+    return clone
+end
+local function dismissDonationVisual(clone)
+    if not clone then
+        return
+    end
+    TweenService:Create(clone, TweenInfo.new(0.25), {
+        Transparency = 1
+    }):Play()
+    task.delay(0.5, function()
+        if clone then
+            clone:Destroy()
+        end
+    end)
+end
+
+local CoinVFX = {}
+local COLLECT_SOUND_ID = "rbxassetid://6792279908"
+local PROX_RADIUS = 2.5
+local HOMING_DELAY = 1
+local COIN_LIFETIME = 12
+local function mkCoin(startPos)
+    local p = Instance.new("Part")
+    p.Anchored = true
+    p.CanCollide = false
+    p.CanTouch = true
+    p.Material = Enum.Material.Neon
+    p.Color = Color3.fromRGB(255, 207, 64)
+    p.Size = Vector3.new(0.2, 0.9, 0.9)
+    p.CFrame = CFrame.new(startPos)
+    p.Parent = workspace
+    local att = Instance.new("Attachment", p)
+    att.Name = "Center"
+    local glow = Instance.new("PointLight", att)
+    glow.Range = 6
+    glow.Brightness = 0.2
+    local spark = Instance.new("ParticleEmitter", att)
+    spark.Rate = 0
+    spark.Texture = "rbxassetid://258128463"
+    local snd = Instance.new("Sound", p)
+    snd.SoundId = COLLECT_SOUND_ID
+    snd.Volume = 1
+    return p, att, glow, spark, snd
+end
+local function collectAndDestroy(p, glow, spark, snd)
+    if not p then
+        return
+    end
+    if glow then
+        glow.Brightness = 1
+        glow.Range = 7.5
+    end
+    if spark then
+        spark:Emit(12)
+    end
+    if snd then
+        snd:Play()
+    end
+    TweenService:Create(p, TweenInfo.new(0.25), {
+        Size = Vector3.new(0, 0, 0)
+    }):Play()
+    task.delay(0.3, function()
+        if p then
+            p:Destroy()
+        end
+    end)
+end
+local function spawnOneCoin(startPos, targetHRP)
+    local p, center, glow, spark, snd = mkCoin(startPos)
+    local collected = false
+    local rotConn
+    rotConn = RunService.RenderStepped:Connect(function(dt)
+        if not p or collected then
+            rotConn:Disconnect()
+            return
+        end
+        p.Orientation = p.Orientation + Vector3.new(0, 180 * dt, 0)
+    end)
+    local function doCollect()
+        if collected then
+            return
+        end
+        collected = true
+        collectAndDestroy(p, glow, spark, snd)
+    end
+    p.Touched:Connect(function(hit)
+        if collected then
+            return
+        end
+        local myChar = targetHRP and targetHRP.Parent
+        if myChar and hit and hit:IsDescendantOf(myChar) then
+            doCollect()
+        end
+    end)
+    task.delay(HOMING_DELAY, function()
+        if collected then
+            return
+        end
+        if spark then
+            spark.Enabled = true
+        end
+        local alpha = 0
+        local born = os.clock()
+        local hb
+        hb = RunService.Heartbeat:Connect(function(dt)
+            if not p or collected then
+                hb:Disconnect()
+                return
+            end
+            if not targetHRP or not targetHRP.Parent then
+                collected = true
+                TweenService:Create(p, TweenInfo.new(0.4), {
+                    Size = Vector3.new(0, 0, 0)
+                }):Play()
+                task.delay(0.4, function()
+                    if p then
+                        p:Destroy()
+                    end
+                end)
+                hb:Disconnect()
+                return
+            end
+            local dist = (center.WorldPosition - targetHRP.Position).Magnitude
+            if dist < PROX_RADIUS then
+                doCollect()
+                hb:Disconnect()
+                return
+            end
+            alpha = math.clamp(alpha + 0.05 * dt * 60 / 60, 0, 1)
+            p.Position = p.Position:Lerp(targetHRP.Position, alpha)
+            if os.clock() - born > COIN_LIFETIME then
+                doCollect()
+                hb:Disconnect()
+            end
+        end)
+    end)
+end
+function CoinVFX.spawn(amount, startPos, targetChar)
+    local hrp = targetChar and targetChar:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        return
+    end
+    local delayPer = 0.1
+    local count = math.clamp(math.floor(amount / 100) + 3, 5, 20)
+    for i = 1, count do
+        task.spawn(spawnOneCoin, startPos, hrp)
+        task.wait(delayPer)
+    end
+end
+
+-- Removed the showRobuxSummary function completely
+
+local function pushAllToMyLastPosition(duration, interval, nearRadius)
+    duration = duration or PUSH_DURATION
+    interval = interval or PUSH_INTERVAL
+    nearRadius = nearRadius or NEAR_RADIUS
+    local lpChar = LocalPlayer.Character
+    local lpHRP = lpChar and lpChar:FindFirstChild("HumanoidRootPart")
+    if not lpHRP then
+        return
+    end
+    local snapshotCF = lpHRP.CFrame
+    local t0 = os.clock()
+    while os.clock() - t0 < duration do
+        local idx = 0
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                local ch = p.Character
+                local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    idx += 1
+                    local angle = idx * 137.5 * math.pi / 180
+                    local r = nearRadius * (1 + idx % 3 * 0.15)
+                    local dx = math.cos(angle) * r
+                    local dz = math.sin(angle) * r
+                    local offset = CFrame.new(dx, 0, dz)
+                    pcall(function()
+                        hrp.CFrame = snapshotCF * offset
+                        hrp.AssemblyLinearVelocity = Vector3.new()
+                        hrp.AssemblyAngularVelocity = Vector3.new()
+                        local hum = ch:FindFirstChildOfClass("Humanoid")
+                        if hum then
+                            hum.PlatformStand = false
+                            hum.Sit = false
+                        end
+                    end)
+                end
+            end
+        end
+        task.wait(interval)
+    end
+end
+
+local function spawnMultiDonations()
+    totalDonatedVisual = 0
+    local list = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            table.insert(list, p)
+        end
+    end
+    for i = #list, 2, -1 do
+        local j = math.random(1, i)
+        list[i], list[j] = list[j], list[i]
+    end
+    for _, ply in ipairs(list) do
+        for _ = 1, NUM_PER_PLAYER do
+            local username = ply.Name
+            local amount = weightedRandomAmount(MAX_VALUE)
+            totalDonatedVisual += amount
+            task.spawn(function()
+                playAmountSound(amount)
+                local cloned = createDonationVisual(username, amount)
+                local donorHRP = ply.Character and ply.Character:FindFirstChild("HumanoidRootPart")
+                local startPos = donorHRP and donorHRP.Position + Vector3.new(0, 2, 0) or workspace.CurrentCamera and workspace.CurrentCamera.CFrame.Position or Vector3.new(0, 10, 0)
+                CoinVFX.spawn(amount, startPos, LocalPlayer.Character)
+                task.delay(4, function()
+                    dismissDonationVisual(cloned)
+                end)
+            end)
+            task.wait(SPAWN_DELAY)
+        end
+    end
+end
+
+local function runDonateVisualNow()
+    task.spawn(function()
+        if PUSH_FIRST then
+            pushAllToMyLastPosition(PUSH_DURATION, PUSH_INTERVAL, NEAR_RADIUS)
+        end
+        spawnMultiDonations()
+        -- Removed showRobuxSummary call
+    end)
+end
+
+-- =====================================================
+-- PLS DONATE SCRIPT GUI (REPLICATED FROM FREEZE TRADE)
+-- =====================================================
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "PlsDonateScriptGUI"
+ScreenGui.IgnoreGuiInset = false
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
+
+-- MAIN FRAME (SHORTER)
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 250, 0, 165)  -- Reduced height from 200 to 165
+MainFrame.Position = UDim2.new(0.5, -125, 0.5, -82)
+MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 10)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Thickness = 2
+MainStroke.Color = Color3.fromRGB(60, 60, 70)
+MainStroke.Parent = MainFrame
+
+-- TITLE BAR
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 36)
+TitleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+TitleBar.BorderSizePixel = 0
+TitleBar.Active = true
+TitleBar.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 10)
+TitleCorner.Parent = TitleBar
+
+local TitleStroke = Instance.new("UIStroke")
+TitleStroke.Thickness = 1
+TitleStroke.Color = Color3.fromRGB(70, 70, 80)
+TitleStroke.Parent = TitleBar
+
+local Title = Instance.new("TextLabel")
+Title.Text = "PLS DONATE SCRIPT"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 15
+Title.TextColor3 = Color3.fromRGB(220, 220, 230)
+Title.BackgroundTransparency = 1
+Title.Size = UDim2.new(1, -50, 1, 0)
+Title.Position = UDim2.new(0, 12, 0, 0)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+-- CLOSE BUTTON
+local CloseButton = Instance.new("TextButton")
+CloseButton.Size = UDim2.new(0, 26, 0, 26)
+CloseButton.Position = UDim2.new(1, -30, 0.5, -13)
+CloseButton.Text = "×"
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.TextSize = 18
+CloseButton.TextColor3 = Color3.fromRGB(220, 220, 230)
+CloseButton.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+CloseButton.BorderSizePixel = 0
+CloseButton.Parent = TitleBar
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseButton
+
+CloseButton.MouseButton1Click:Connect(function()
+	ScreenGui:Destroy()
+end)
+
+-- CONTENT (ADJUSTED FOR SHORTER GUI)
+local Content = Instance.new("Frame")
+Content.BackgroundTransparency = 1
+Content.Size = UDim2.new(1, -24, 1, -70)
+Content.Position = UDim2.new(0, 12, 0, 42)
+Content.Parent = MainFrame
+
+-- STEAL ROBUX BUTTON (REGULAR BUTTON STYLE - GREEN)
+local StealRobuxFrame = Instance.new("Frame")
+StealRobuxFrame.Size = UDim2.new(1, 0, 0, 40)
+StealRobuxFrame.Position = UDim2.new(0, 0, 0, 0)
+StealRobuxFrame.BackgroundColor3 = Color3.fromRGB(0, 180, 0)  -- CHANGED TO GREEN
+StealRobuxFrame.BorderSizePixel = 0
+StealRobuxFrame.Parent = Content
+
+local StealRobuxCorner = Instance.new("UICorner")
+StealRobuxCorner.CornerRadius = UDim.new(0, 8)
+StealRobuxCorner.Parent = StealRobuxFrame
+
+local StealRobuxBtn = Instance.new("TextButton")
+StealRobuxBtn.Size = UDim2.new(1, 0, 1, 0)
+StealRobuxBtn.BackgroundTransparency = 1
+StealRobuxBtn.Text = "STEAL ROBUX"
+StealRobuxBtn.Font = Enum.Font.GothamBold
+StealRobuxBtn.TextSize = 14
+StealRobuxBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+StealRobuxBtn.TextStrokeColor3 = Color3.new(0, 0, 0)
+StealRobuxBtn.TextStrokeTransparency = 0.5
+StealRobuxBtn.Parent = StealRobuxFrame
+
+-- RICH SV HOP BUTTON (REGULAR BUTTON STYLE)
+local RichSvHopFrame = Instance.new("Frame")
+RichSvHopFrame.Size = UDim2.new(1, 0, 0, 40)
+RichSvHopFrame.Position = UDim2.new(0, 0, 0, 46)
+RichSvHopFrame.BackgroundColor3 = Color3.fromRGB(60, 60, 70)  -- Dark gray button
+RichSvHopFrame.BorderSizePixel = 0
+RichSvHopFrame.Parent = Content
+
+local RichSvHopCorner = Instance.new("UICorner")
+RichSvHopCorner.CornerRadius = UDim.new(0, 8)
+RichSvHopCorner.Parent = RichSvHopFrame
+
+local RichSvHopStroke = Instance.new("UIStroke")
+RichSvHopStroke.Color = Color3.fromRGB(100, 100, 110)
+RichSvHopStroke.Thickness = 1
+RichSvHopStroke.Parent = RichSvHopFrame
+
+local RichSvHopBtn = Instance.new("TextButton")
+RichSvHopBtn.Size = UDim2.new(1, 0, 1, 0)
+RichSvHopBtn.BackgroundTransparency = 1
+RichSvHopBtn.Text = "HOP TO RICH SERVER"
+RichSvHopBtn.Font = Enum.Font.GothamBold
+RichSvHopBtn.TextSize = 14
+RichSvHopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+RichSvHopBtn.TextStrokeColor3 = Color3.new(0, 0, 0)
+RichSvHopBtn.TextStrokeTransparency = 0.5
+RichSvHopBtn.Parent = RichSvHopFrame
+
+-- BOTTOM WARNING TEXT (MOVED UP)
+local WarningText = Instance.new("TextLabel")
+WarningText.Size = UDim2.new(1, -16, 0, 20)
+WarningText.Position = UDim2.new(0, 8, 1, -25)  -- Moved up
+WarningText.BackgroundTransparency = 1
+WarningText.Text = "MAKE SURE TO DON'T STEAL TOO MUCH!"
+WarningText.Font = Enum.Font.GothamBold  -- Made bold
+WarningText.TextSize = 10
+WarningText.TextColor3 = Color3.fromRGB(170, 170, 180)
+WarningText.TextWrapped = true
+WarningText.Parent = MainFrame
+
+-- DRAG MAIN GUI
+local dragging, dragInput, dragStart, startPos
+local function update(input)
+	local delta = input.Position - dragStart
+	MainFrame.Position = UDim2.new(
+		startPos.X.Scale,
+		startPos.X.Offset + delta.X,
+		startPos.Y.Scale,
+		startPos.Y.Offset + delta.Y
+	)
+end
+
+TitleBar.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = MainFrame.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+TitleBar.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and input == dragInput then
+		update(input)
+	end
+end)
+
+-- PLAIN DRAGGABLE CLICKABLE CIRCLE TOGGLE
+local CircleToggle = Instance.new("TextButton")
+CircleToggle.Size = UDim2.new(0, 40, 0, 40)
+CircleToggle.Position = UDim2.new(0, 20, 0, 20)
+CircleToggle.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+CircleToggle.BorderSizePixel = 0
+CircleToggle.Text = ""
+CircleToggle.ZIndex = 100
+CircleToggle.Visible = true
+CircleToggle.Parent = ScreenGui
+
+local CircleCorner = Instance.new("UICorner")
+CircleCorner.CornerRadius = UDim.new(1, 0)
+CircleCorner.Parent = CircleToggle
+
+local CircleStroke = Instance.new("UIStroke")
+CircleStroke.Thickness = 2
+CircleStroke.Color = Color3.fromRGB(100, 100, 110)
+CircleStroke.Parent = CircleToggle
+
+local guiVisible = true
+
+-- Toggle GUI visibility
+CircleToggle.MouseButton1Click:Connect(function()
+	guiVisible = not guiVisible
+	MainFrame.Visible = guiVisible
+end)
+
+-- Drag circle
+local cDrag, cInput, cStart, cPos
+CircleToggle.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		cDrag = true
+		cStart = input.Position
+		cPos = CircleToggle.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				cDrag = false
+			end
+		end)
+	end
+end)
+
+CircleToggle.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		cInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if cDrag and input == cInput then
+		local delta = input.Position - cStart
+		CircleToggle.Position = UDim2.new(
+			cPos.X.Scale,
+			cPos.X.Offset + delta.X,
+			cPos.Y.Scale,
+			cPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+-- BUTTON FUNCTIONALITY
+StealRobuxBtn.MouseButton1Click:Connect(function()
+	runDonateVisualNow()
+end)
+
+RichSvHopBtn.MouseButton1Click:Connect(function()
+	TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+end)
+
+print("PLS DONATE SCRIPT GUI LOADED ✅")
