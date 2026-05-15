@@ -1,0 +1,336 @@
+-- baiyan shit insta steal
+-- made by baiyan scripts | Delta Mobile/PC God Mode
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+local isTeleporting = false
+local noclipEnabled = false
+local noclipConn = nil
+local fastStealOn = false
+local fastStealLoop = nil
+local fastStealConn = nil
+
+-- ====================== ORIGINAL FUNCTIONS (unchanged) ======================
+local function getCharacter()
+	local char = LocalPlayer.Character
+	if not char or not char.Parent then char = LocalPlayer.CharacterAdded:Wait() end
+	return char
+end
+
+local function getMyPlot()
+	local plots = workspace:FindFirstChild("Plots")
+	if not plots then return nil end
+	for _, plot in ipairs(plots:GetChildren()) do
+		local label = plot:FindFirstChild("PlotSign")
+			and plot.PlotSign:FindFirstChild("SurfaceGui")
+			and plot.PlotSign.SurfaceGui:FindFirstChild("Frame")
+			and plot.PlotSign.SurfaceGui.Frame:FindFirstChild("TextLabel")
+		if label then
+			local t = (label.ContentText or label.Text or "")
+			if t:find(LocalPlayer.DisplayName) and t:find("Base") then
+				return plot
+			end
+		end
+	end
+	return nil
+end
+
+local function getDeliveryHitbox()
+	local myPlot = getMyPlot()
+	if not myPlot then return nil end
+	local delivery = myPlot:FindFirstChild("DeliveryHitbox") or myPlot:FindFirstChild("DeliveryHitbox", true)
+	if delivery and delivery:IsA("BasePart") then return delivery end
+	return nil
+end
+
+local function setNoclip(on)
+	noclipEnabled = on
+	if on then
+		if noclipConn then noclipConn:Disconnect() end
+		noclipConn = RunService.Stepped:Connect(function()
+			local char = LocalPlayer.Character
+			if char then for _, part in ipairs(char:GetDescendants()) do if part:IsA("BasePart") then part.CanCollide = false end end end
+		end)
+	else
+		if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+		local char = LocalPlayer.Character
+		if char then for _, part in ipairs(char:GetDescendants()) do if part:IsA("BasePart") then part.CanCollide = true end end end
+	end
+end
+
+local function shortTeleportFreezeCamera(targetCF, duration)
+	if isTeleporting then return end
+	isTeleporting = true
+	duration = duration or 0.2
+	if duration < 0.1 then duration = 0.1 end
+	if duration > 0.5 then duration = 0.5 end
+
+	local character = getCharacter()
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if not hrp then isTeleporting = false return end
+
+	local camera = workspace.CurrentCamera
+	if not camera then isTeleporting = false return end
+
+	local originalCF = hrp.CFrame
+	local originalCamType = camera.CameraType
+	local originalCamSub = camera.CameraSubject
+	local originalCamCFrame = camera.CFrame
+
+	local function restoreCamera()
+		local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if hum then
+			camera.CameraSubject = hum
+			camera.CameraType = Enum.CameraType.Custom
+		else
+			camera.CameraType = originalCamType or Enum.CameraType.Custom
+			camera.CameraSubject = originalCamSub
+		end
+		camera.CFrame = originalCamCFrame
+	end
+
+	pcall(function()
+		camera.CameraType = Enum.CameraType.Scriptable
+		camera.CFrame = originalCamCFrame
+		hrp.CFrame = targetCF
+		task.wait(duration)
+		hrp.CFrame = originalCF
+	end)
+	restoreCamera()
+	isTeleporting = false
+end
+
+local function doInstantSteal()
+	local delivery = getDeliveryHitbox()
+	if not delivery then return end
+	local targetCF = delivery.CFrame + delivery.CFrame.LookVector * 3 + Vector3.new(0, 3, 0)
+	shortTeleportFreezeCamera(targetCF, 0.25)
+end
+
+local function doForwardTP()
+	local hrp = getCharacter():FindFirstChild("HumanoidRootPart")
+	if hrp then hrp.CFrame = hrp.CFrame + hrp.CFrame.LookVector * 8 end
+end
+
+local function doTPToBase()
+	local myPlot = getMyPlot()
+	if not myPlot then return end
+	local spawn = myPlot:FindFirstChild("SpawnLocation") or myPlot:FindFirstChild("Spawn")
+	if spawn and spawn:IsA("BasePart") then
+		local hrp = getCharacter():FindFirstChild("HumanoidRootPart")
+		if hrp then hrp.CFrame = spawn.CFrame + Vector3.new(0, 5, 0) end
+	end
+end
+
+local function patchPrompt(prompt)
+	if prompt:IsA("ProximityPrompt") then
+		pcall(function() if prompt.HoldDuration > 0.01 then prompt.HoldDuration = 0.01 end end)
+	end
+end
+
+local function setFastSteal(on)
+	fastStealOn = on
+	if on then
+		task.spawn(function()
+			for _, obj in ipairs(workspace:GetDescendants()) do
+				if obj:IsA("ProximityPrompt") then patchPrompt(obj) end
+			end
+		end)
+		if not fastStealLoop then
+			fastStealLoop = task.spawn(function()
+				while fastStealOn do
+					pcall(function()
+						for _, obj in ipairs(workspace:GetDescendants()) do
+							if obj:IsA("ProximityPrompt") then patchPrompt(obj) end
+						end
+					end)
+					task.wait(0.08)
+				end
+				fastStealLoop = nil
+			end)
+		end
+		if fastStealConn then fastStealConn:Disconnect() end
+		fastStealConn = workspace.DescendantAdded:Connect(function(obj)
+			if fastStealOn and obj:IsA("ProximityPrompt") then patchPrompt(obj) end
+		end)
+	else
+		if fastStealConn then fastStealConn:Disconnect() fastStealConn = nil end
+	end
+end
+
+-- =================================== GUI WITH MINIMIZE BUTTON ===================================
+local function createUI()
+	local guiParent = game:GetService("CoreGui")
+	pcall(function() if gethui then guiParent = gethui() end end)
+	local old = guiParent:FindFirstChild("BaiyanShit_UI")
+	if old then old:Destroy() end
+
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "BaiyanShit_UI"
+	screenGui.ResetOnSpawn = false
+	screenGui.IgnoreGuiInset = true
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+	screenGui.Parent = guiParent
+
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Size = UDim2.new(0, 240, 0, 300)
+	mainFrame.Position = UDim2.new(0.68, -120, 0.5, -150)
+	mainFrame.BackgroundColor3 = Color3.fromRGB(15,16,24)
+	mainFrame.BorderSizePixel = 0
+	mainFrame.Parent = screenGui
+	Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0,18)
+	Instance.new("UIGradient", mainFrame).Color = ColorSequence.new{
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(40,45,90)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(25,28,55)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(15,16,24))
+	}
+
+	local header = Instance.new("Frame")
+	header.Size = UDim2.new(1,0,0,40)
+	header.BackgroundColor3 = Color3.fromRGB(25,26,38)
+	header.Parent = mainFrame
+	Instance.new("UICorner", header).CornerRadius = UDim.new(0,18)
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1,-100,1,0)
+	title.Position = UDim2.new(0,12,0,0)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBold
+	title.Text = "baiyan shit insta steal"
+	title.TextSize = 15
+	title.TextColor3 = Color3.fromRGB(255,255,255)
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Parent = header
+
+	local subtitle = Instance.new("TextLabel")
+	subtitle.Size = UDim2.new(1,-100,1,0)
+	subtitle.Position = UDim2.new(0,12,0,18)
+	subtitle.BackgroundTransparency = 1
+	subtitle.Font = Enum.Font.Gotham
+	subtitle.Text = "made by baiyan scripts"
+	subtitle.TextSize = 11
+	subtitle.TextColor3 = Color3.fromRGB(180,190,240)
+	subtitle.TextXAlignment = Enum.TextXAlignment.Left
+	subtitle.Parent = header
+
+	-- MINIMIZE BUTTON
+	local minimizeBtn = Instance.new("TextButton")
+	minimizeBtn.Size = UDim2.new(0,22,0,22)
+	minimizeBtn.Position = UDim2.new(1,-58,0.5,-11)
+	minimizeBtn.BackgroundColor3 = Color3.fromRGB(255,193,7)
+	minimizeBtn.Text = "−"
+	minimizeBtn.TextColor3 = Color3.new(0,0,0)
+	minimizeBtn.Font = Enum.Font.GothamBold
+	minimizeBtn.TextSize = 18
+	minimizeBtn.Parent = header
+	Instance.new("UICorner", minimizeBtn).CornerRadius = UDim.new(1,0)
+
+	-- CLOSE BUTTON (RED WITH X)
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.new(0,22,0,22)
+	closeBtn.Position = UDim2.new(1,-30,0.5,-11)
+	closeBtn.BackgroundColor3 = Color3.fromRGB(220,20,60)
+	closeBtn.Text = "X"
+	closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.TextSize = 14
+	closeBtn.Parent = header
+	Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(1,0)
+	closeBtn.MouseButton1Click:Connect(function() screenGui:Destroy() end)
+
+	-- Draggable
+	local dragging, dragStart, startPos
+	header.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = true; dragStart = i.Position; startPos = mainFrame.Position
+		end
+	end)
+	header.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local delta = i.Position - dragStart
+			mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function() dragging = false end)
+
+	-- Body + Buttons
+	local body = Instance.new("Frame")
+	body.Size = UDim2.new(1,-20,1,-58)
+	body.Position = UDim2.new(0,10,0,46)
+	body.BackgroundTransparency = 1
+	body.Parent = mainFrame
+	local layout = Instance.new("UIListLayout", body)
+	layout.Padding = UDim.new(0,6)
+
+	local function btn(text, col, txtcol)
+		local b = Instance.new("TextButton")
+		b.Size = UDim2.new(1,0,0,34)
+		b.BackgroundColor3 = col
+		b.Text = text
+		b.TextColor3 = txtcol or Color3.fromRGB(255,255,255)
+		b.Font = Enum.Font.GothamBold
+		b.TextSize = 14
+		b.AutoButtonColor = true
+		b.Parent = body
+		Instance.new("UICorner", b).CornerRadius = UDim.new(0,10)
+		return b
+	end
+
+	local instantBtn = btn("INSTANT STEAL", Color3.fromRGB(90,155,255))
+	local forwardBtn  = btn("TP FORWARD", Color3.fromRGB(135,215,170), Color3.fromRGB(20,25,25))
+	local baseBtn     = btn("TP TO BASE", Color3.fromRGB(255,85,85))
+	local noclipBtn   = btn("NOCLIP: OFF", Color3.fromRGB(110,95,170), Color3.fromRGB(235,235,245))
+	local fastBtn     = btn("FAST STEAL: OFF", Color3.fromRGB(140,130,150), Color3.fromRGB(240,240,245))
+
+	-- Toggle button (≡ on the side)
+	local toggle = Instance.new("TextButton")
+	toggle.Size = UDim2.new(0,34,0,34)
+	toggle.Position = UDim2.new(0.02,0,0.5,-17)
+	toggle.BackgroundColor3 = Color3.fromRGB(35,36,50)
+	toggle.Text = "≡"
+	toggle.TextColor3 = Color3.fromRGB(255,255,255)
+	toggle.Font = Enum.Font.GothamBold
+	toggle.Parent = screenGui
+	Instance.new("UICorner", toggle).CornerRadius = UDim.new(1,0)
+
+	-- MINIMIZE FUNCTION
+	minimizeBtn.MouseButton1Click:Connect(function()
+		body.Visible = not body.Visible
+		minimizeBtn.Text = body.Visible and "−" or "+"
+		mainFrame.Size = body.Visible and UDim2.new(0,240,0,300) or UDim2.new(0,240,0,40)
+	end)
+
+	toggle.MouseButton1Click:Connect(function()
+		mainFrame.Visible = not mainFrame.Visible
+		toggle.Text = mainFrame.Visible and "≡" or "▶"
+	end)
+
+	-- Mobile scaling
+	local scale = Instance.new("UIScale", mainFrame)
+	scale.Scale = 1
+	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		local vp = workspace.CurrentCamera.ViewportSize
+		scale.Scale = math.min(vp.X, vp.Y) <= 720 and 0.9 or 1
+	end)
+
+	-- Connections
+	instantBtn.MouseButton1Click:Connect(doInstantSteal)
+	forwardBtn.MouseButton1Click:Connect(doForwardTP)
+	baseBtn.MouseButton1Click:Connect(doTPToBase)
+	noclipBtn.MouseButton1Click:Connect(function()
+		setNoclip(not noclipEnabled)
+		noclipBtn.Text = noclipEnabled and "NOCLIP: ON" or "NOCLIP: OFF"
+		noclipBtn.BackgroundColor3 = noclipEnabled and Color3.fromRGB(210,135,255) or Color3.fromRGB(110,95,170)
+	end)
+	fastBtn.MouseButton1Click:Connect(function()
+		setFastSteal(not fastStealOn)
+		fastBtn.Text = fastStealOn and "FAST STEAL: ON" or "FAST STEAL: OFF"
+		fastBtn.BackgroundColor3 = fastStealOn and Color3.fromRGB(245,175,100) or Color3.fromRGB(140,130,150)
+		fastBtn.TextColor3 = fastStealOn and Color3.fromRGB(35,25,15) or Color3.fromRGB(240,240,245)
+	end)
+end
+
+createUI()
