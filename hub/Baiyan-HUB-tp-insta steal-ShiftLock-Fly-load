@@ -1,0 +1,596 @@
+-- tenacious was here | baiyan hub + insta steal features in Settings
+
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local StarterGui = game:GetService("StarterGui")
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+local Backpack = Player:WaitForChild("Backpack")
+
+-- Clean up old GUI
+if PlayerGui:FindFirstChild("BaiyanHub") then PlayerGui.BaiyanHub:Destroy() end
+
+local ElevenHub = Instance.new("ScreenGui")
+ElevenHub.Name = "BaiyanHub"
+ElevenHub.Parent = PlayerGui
+ElevenHub.ResetOnSpawn = false
+
+-- FEATURE VARIABLES ───────────────────────────────────────
+local targetSpeed = 28.5
+local speedEnabled = false
+local jumpEnabled = false
+local JUMP_VELOCITY = 65
+local megaphoneEnabled = false
+local antiRagdollEnabled = false
+local spinning = false 
+local spinSpeed = 50 
+local flyLoaded = false
+local shiftLockLoaded = false   -- 新增：追蹤 ShiftLock 是否已成功載入
+
+-- TELEPORT SAVE
+local savedPosition = nil
+
+-- INSTA STEAL / SHIT FEATURES
+local isTeleporting = false
+local noclipEnabled = false
+local noclipConn = nil
+local fastStealOn = false
+local fastStealLoop = nil
+local fastStealConn = nil
+
+-- ──────────────────────────────────────────────────────────
+-- TELEPORT SAVE FUNCTIONS
+-- ──────────────────────────────────────────────────────────
+
+local function savePos()
+    local char = Player.Character
+    if char then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            savedPosition = hrp.CFrame
+            StarterGui:SetCore("SendNotification", {Title = "Save Pos", Text = "Position saved!", Duration = 3})
+        end
+    end
+end
+
+local function tpToSaved()
+    local char = Player.Character
+    if char and savedPosition then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.CFrame = savedPosition
+            StarterGui:SetCore("SendNotification", {Title = "Teleport", Text = "Back to saved spot!", Duration = 3})
+        end
+    else
+        StarterGui:SetCore("SendNotification", {Title = "Teleport", Text = "No position saved yet!", Duration = 3})
+    end
+end
+
+-- ──────────────────────────────────────────────────────────
+-- INSTA STEAL / UTILITY FUNCTIONS
+-- ──────────────────────────────────────────────────────────
+
+local function getCharacter()
+    local char = Player.Character
+    if not char or not char.Parent then char = Player.CharacterAdded:Wait() end
+    return char
+end
+
+local function getMyPlot()
+    local plots = workspace:FindFirstChild("Plots")
+    if not plots then return nil end
+    for _, plot in ipairs(plots:GetChildren()) do
+        local label = plot:FindFirstChild("PlotSign") 
+            and plot.PlotSign:FindFirstChild("SurfaceGui") 
+            and plot.PlotSign.SurfaceGui:FindFirstChild("Frame") 
+            and plot.PlotSign.SurfaceGui.Frame:FindFirstChild("TextLabel")
+        if label then
+            local t = (label.ContentText or label.Text or "")
+            if t:find(Player.DisplayName) and t:find("Base") then
+                return plot
+            end
+        end
+    end
+    return nil
+end
+
+local function getDeliveryHitbox()
+    local myPlot = getMyPlot()
+    if not myPlot then return nil end
+    local delivery = myPlot:FindFirstChild("DeliveryHitbox") or myPlot:FindFirstChild("DeliveryHitbox", true)
+    if delivery and delivery:IsA("BasePart") then return delivery end
+    return nil
+end
+
+local function setNoclip(on)
+    noclipEnabled = on
+    if on then
+        if noclipConn then noclipConn:Disconnect() end
+        noclipConn = RunService.Stepped:Connect(function()
+            local char = Player.Character
+            if char then 
+                for _, part in ipairs(char:GetDescendants()) do 
+                    if part:IsA("BasePart") then part.CanCollide = false end 
+                end 
+            end
+        end)
+    else
+        if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+        local char = Player.Character
+        if char then 
+            for _, part in ipairs(char:GetDescendants()) do 
+                if part:IsA("BasePart") then part.CanCollide = true end 
+            end 
+        end
+    end
+end
+
+local function shortTeleportFreezeCamera(targetCF, duration)
+    if isTeleporting then return end
+    isTeleporting = true
+    duration = math.clamp(duration or 0.2, 0.1, 0.5)
+
+    local character = getCharacter()
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then isTeleporting = false return end
+
+    local camera = workspace.CurrentCamera
+    if not camera then isTeleporting = false return end
+
+    local originalCF = hrp.CFrame
+    local originalCamType = camera.CameraType
+    local originalCamCFrame = camera.CFrame
+
+    local function restore()
+        local hum = Player.Character and Player.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            camera.CameraSubject = hum
+            camera.CameraType = Enum.CameraType.Custom
+        else
+            camera.CameraType = originalCamType
+        end
+        camera.CFrame = originalCamCFrame
+    end
+
+    pcall(function()
+        camera.CameraType = Enum.CameraType.Scriptable
+        camera.CFrame = originalCamCFrame
+        hrp.CFrame = targetCF
+        task.wait(duration)
+        hrp.CFrame = originalCF
+    end)
+    restore()
+    isTeleporting = false
+end
+
+local function doInstantSteal()
+    local delivery = getDeliveryHitbox()
+    if not delivery then return end
+    local targetCF = delivery.CFrame + delivery.CFrame.LookVector * 3 + Vector3.new(0, 3, 0)
+    shortTeleportFreezeCamera(targetCF, 0.25)
+end
+
+local function doForwardTP()
+    local hrp = getCharacter():FindFirstChild("HumanoidRootPart")
+    if hrp then 
+        hrp.CFrame = hrp.CFrame + hrp.CFrame.LookVector * 8 
+    end
+end
+
+local function doTPToBase()
+    local myPlot = getMyPlot()
+    if not myPlot then return end
+    local spawn = myPlot:FindFirstChild("SpawnLocation") or myPlot:FindFirstChild("Spawn")
+    if spawn and spawn:IsA("BasePart") then
+        local hrp = getCharacter():FindFirstChild("HumanoidRootPart")
+        if hrp then 
+            hrp.CFrame = spawn.CFrame + Vector3.new(0, 5, 0) 
+        end
+    end
+end
+
+local function patchPrompt(prompt)
+    if prompt:IsA("ProximityPrompt") then
+        pcall(function()
+            if prompt.HoldDuration > 0.01 then 
+                prompt.HoldDuration = 0.01 
+            end
+        end)
+    end
+end
+
+local function setFastSteal(on)
+    fastStealOn = on
+    if on then
+        task.spawn(function()
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("ProximityPrompt") then patchPrompt(obj) end
+            end
+        end)
+        if fastStealConn then fastStealConn:Disconnect() end
+        fastStealConn = workspace.DescendantAdded:Connect(function(obj)
+            if fastStealOn and obj:IsA("ProximityPrompt") then patchPrompt(obj) end
+        end)
+        if not fastStealLoop then
+            fastStealLoop = task.spawn(function()
+                while fastStealOn do
+                    pcall(function()
+                        for _, obj in ipairs(workspace:GetDescendants()) do
+                            if obj:IsA("ProximityPrompt") then patchPrompt(obj) end
+                        end
+                    end)
+                    task.wait(0.08)
+                end
+            end)
+        end
+    else
+        if fastStealConn then fastStealConn:Disconnect() fastStealConn = nil end
+    end
+end
+
+-- ──────────────────────────────────────────────────────────
+-- CORE LOGIC (original + spin)
+-- ──────────────────────────────────────────────────────────
+
+local function setupSpin(char)
+    local hrp = char:WaitForChild("HumanoidRootPart")
+    local existing = hrp:FindFirstChild("BaiyanSpin")
+    if existing then existing:Destroy() end
+    local bav = Instance.new("BodyAngularVelocity")
+    bav.Name = "BaiyanSpin"
+    bav.MaxTorque = Vector3.new(0, math.huge, 0)
+    bav.P = 100000
+    bav.AngularVelocity = Vector3.new(0, 0, 0)
+    bav.Parent = hrp
+end
+
+Player.CharacterAdded:Connect(setupSpin)
+if Player.Character then setupSpin(Player.Character) end
+
+UIS.JumpRequest:Connect(function()
+    if not jumpEnabled then return end
+    local char = Player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local v = hrp.AssemblyLinearVelocity
+        hrp.AssemblyLinearVelocity = Vector3.new(v.X, JUMP_VELOCITY, v.Z)
+    end
+end)
+
+-- ──────────────────────────────────────────────────────────
+-- UI CONSTRUCTION
+-- ──────────────────────────────────────────────────────────
+
+local MainFrame = Instance.new("Frame", ElevenHub)
+MainFrame.Size = UDim2.new(0, 320, 0, 250)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -125)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MainFrame.Visible = false
+Instance.new("UICorner", MainFrame)
+
+local Sidebar = Instance.new("Frame", MainFrame)
+Sidebar.Size = UDim2.new(0, 85, 1, 0)
+Sidebar.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+Instance.new("UICorner", Sidebar)
+
+local TabContainer = Instance.new("Frame", Sidebar)
+TabContainer.Position = UDim2.new(0, 0, 0, 50)
+TabContainer.Size = UDim2.new(1, 0, 1, -50)
+TabContainer.BackgroundTransparency = 1
+Instance.new("UIListLayout", TabContainer).HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+local Pages = Instance.new("Frame", MainFrame)
+Pages.Position = UDim2.new(0, 95, 0, 10)
+Pages.Size = UDim2.new(1, -105, 1, -20)
+Pages.BackgroundTransparency = 1
+
+local function CreateTabPage(name)
+    local PageFrame = Instance.new("Frame", Pages)
+    PageFrame.Name = name .. "Page"
+    PageFrame.Size = UDim2.new(1, 0, 1, 0)
+    PageFrame.BackgroundTransparency = 1
+    PageFrame.Visible = false
+    local Nav = Instance.new("Frame", PageFrame)
+    Nav.Size = UDim2.new(1, 0, 0, 32)
+    Nav.BackgroundTransparency = 1
+    local LBtn = Instance.new("TextButton", Nav)
+    LBtn.Size = UDim2.new(0.48, 0, 1, 0)
+    LBtn.Text = "Left"
+    LBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    LBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Instance.new("UICorner", LBtn)
+    local RBtn = Instance.new("TextButton", Nav)
+    RBtn.Position = UDim2.new(0.52, 0, 0, 0)
+    RBtn.Size = UDim2.new(0.48, 0, 1, 0)
+    RBtn.Text = "Right"
+    RBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    RBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Instance.new("UICorner", RBtn)
+    local LeftCat = Instance.new("Frame", PageFrame)
+    LeftCat.Position = UDim2.new(0, 0, 0, 40)
+    LeftCat.Size = UDim2.new(1, 0, 1, -40)
+    LeftCat.BackgroundTransparency = 1
+    Instance.new("UIListLayout", LeftCat).Padding = UDim.new(0, 5)
+    local RightCat = Instance.new("Frame", PageFrame)
+    RightCat.Position = UDim2.new(0, 0, 0, 40)
+    RightCat.Size = UDim2.new(1, 0, 1, -40)
+    RightCat.BackgroundTransparency = 1
+    RightCat.Visible = false
+    Instance.new("UIListLayout", RightCat).Padding = UDim.new(0, 5)
+    LBtn.MouseButton1Click:Connect(function() LeftCat.Visible = true RightCat.Visible = false end)
+    RBtn.MouseButton1Click:Connect(function() LeftCat.Visible = false RightCat.Visible = true end)
+    return PageFrame, LeftCat, RightCat
+end
+
+local MainPage,   MainLeft,   MainRight   = CreateTabPage("Main")
+local DuelsPage,  DuelsLeft,  DuelsRight  = CreateTabPage("Duels")
+local SettingsPage, SettingsLeft, SettingsRight = CreateTabPage("Settings")
+MainPage.Visible = true
+
+local function MakeTabButton(name, targetPage)
+    local b = Instance.new("TextButton", TabContainer)
+    b.Size = UDim2.new(0.85, 0, 0, 30)
+    b.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    b.Text = name
+    b.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Instance.new("UICorner", b)
+    b.MouseButton1Click:Connect(function()
+        for _, p in pairs(Pages:GetChildren()) do if p:IsA("Frame") then p.Visible = false end end
+        targetPage.Visible = true
+    end)
+end
+MakeTabButton("Main", MainPage)
+MakeTabButton("Duels", DuelsPage)
+MakeTabButton("Settings", SettingsPage)
+
+-- ──────────────────────────────────────────────────────────
+-- BUTTONS ─ Main & Duels
+-- ──────────────────────────────────────────────────────────
+
+-- Main Left
+local SpeedBtn    = Instance.new("TextButton", MainLeft) SpeedBtn.Size = UDim2.new(1,0,0,32) SpeedBtn.BackgroundColor3 = Color3.fromRGB(40,40,40) SpeedBtn.TextColor3 = Color3.fromRGB(255,255,255) Instance.new("UICorner", SpeedBtn)
+local JumpBtn     = Instance.new("TextButton", MainLeft) JumpBtn.Size = UDim2.new(1,0,0,32) JumpBtn.BackgroundColor3 = Color3.fromRGB(40,40,40) JumpBtn.TextColor3 = Color3.fromRGB(255,255,255) Instance.new("UICorner", JumpBtn)
+local MegaphoneBtn= Instance.new("TextButton", MainLeft) MegaphoneBtn.Size = UDim2.new(1,0,0,32) MegaphoneBtn.BackgroundColor3 = Color3.fromRGB(40,40,40) MegaphoneBtn.TextColor3 = Color3.fromRGB(255,255,255) Instance.new("UICorner", MegaphoneBtn)
+local AntiRagBtn  = Instance.new("TextButton", MainLeft) AntiRagBtn.Size = UDim2.new(1,0,0,32) AntiRagBtn.BackgroundColor3 = Color3.fromRGB(40,40,40) AntiRagBtn.TextColor3 = Color3.fromRGB(255,255,255) Instance.new("UICorner", AntiRagBtn)
+
+SpeedBtn.MouseButton1Click:Connect(function() speedEnabled = not speedEnabled end)
+JumpBtn.MouseButton1Click:Connect(function() jumpEnabled = not jumpEnabled end)
+MegaphoneBtn.MouseButton1Click:Connect(function() megaphoneEnabled = not megaphoneEnabled end)
+AntiRagBtn.MouseButton1Click:Connect(function() antiRagdollEnabled = not antiRagdollEnabled end)
+
+-- Main Right
+local DevourBtn   = Instance.new("TextButton", MainRight) DevourBtn.Size = UDim2.new(1,0,0,32) DevourBtn.Text = "Devour (Lag)" DevourBtn.BackgroundColor3 = Color3.fromRGB(0,170,255) DevourBtn.TextColor3 = Color3.fromRGB(255,255,255) Instance.new("UICorner", DevourBtn)
+local SavePosBtn  = Instance.new("TextButton", MainRight) SavePosBtn.Size = UDim2.new(1,0,0,32) SavePosBtn.Position = UDim2.new(0,0,0,40) SavePosBtn.BackgroundColor3 = Color3.fromRGB(0,200,100) SavePosBtn.TextColor3 = Color3.fromRGB(255,255,255) SavePosBtn.Text = "Save Pos (Base)" Instance.new("UICorner", SavePosBtn)
+local TpBackBtn   = Instance.new("TextButton", MainRight) TpBackBtn.Size = UDim2.new(1,0,0,32) TpBackBtn.Position = UDim2.new(0,0,0,80) TpBackBtn.BackgroundColor3 = Color3.fromRGB(220,60,60) TpBackBtn.TextColor3 = Color3.fromRGB(255,255,255) TpBackBtn.Text = "TP to Saved Pos" Instance.new("UICorner", TpBackBtn)
+
+DevourBtn.MouseButton1Click:Connect(function() --[[ your runDevourLag() here if wanted ]] end)
+SavePosBtn.MouseButton1Click:Connect(savePos)
+TpBackBtn.MouseButton1Click:Connect(tpToSaved)
+
+-- Duels Left
+local SpinBtn = Instance.new("TextButton", DuelsLeft) SpinBtn.Size = UDim2.new(1,0,0,32) SpinBtn.BackgroundColor3 = Color3.fromRGB(40,40,40) SpinBtn.TextColor3 = Color3.fromRGB(255,255,255) Instance.new("UICorner", SpinBtn)
+SpinBtn.MouseButton1Click:Connect(function() spinning = not spinning end)
+
+-- ──────────────────────────────────────────────────────────
+-- SETTINGS ── insta steal + shiftlock + FLY
+-- ──────────────────────────────────────────────────────────
+
+-- Settings Right
+local InstantStealBtn = Instance.new("TextButton", SettingsRight)
+InstantStealBtn.Size = UDim2.new(1,0,0,32)
+InstantStealBtn.BackgroundColor3 = Color3.fromRGB(90,155,255)
+InstantStealBtn.TextColor3 = Color3.fromRGB(255,255,255)
+InstantStealBtn.Text = "Instant Steal"
+Instance.new("UICorner", InstantStealBtn)
+
+local ForwardTPBtn = Instance.new("TextButton", SettingsRight)
+ForwardTPBtn.Size = UDim2.new(1,0,0,32)
+ForwardTPBtn.BackgroundColor3 = Color3.fromRGB(135,215,170)
+ForwardTPBtn.TextColor3 = Color3.fromRGB(20,25,25)
+ForwardTPBtn.Text = "TP Forward ×8"
+Instance.new("UICorner", ForwardTPBtn)
+
+local TPBaseBtn = Instance.new("TextButton", SettingsRight)
+TPBaseBtn.Size = UDim2.new(1,0,0,32)
+TPBaseBtn.BackgroundColor3 = Color3.fromRGB(255,85,85)
+TPBaseBtn.TextColor3 = Color3.fromRGB(255,255,255)
+TPBaseBtn.Text = "TP to My Base"
+Instance.new("UICorner", TPBaseBtn)
+
+local NoclipBtn = Instance.new("TextButton", SettingsRight)
+NoclipBtn.Size = UDim2.new(1,0,0,32)
+NoclipBtn.BackgroundColor3 = Color3.fromRGB(110,95,170)
+NoclipBtn.TextColor3 = Color3.fromRGB(235,235,245)
+NoclipBtn.Text = "Noclip: OFF"
+Instance.new("UICorner", NoclipBtn)
+
+local FastStealBtn = Instance.new("TextButton", SettingsRight)
+FastStealBtn.Size = UDim2.new(1,0,0,32)
+FastStealBtn.BackgroundColor3 = Color3.fromRGB(140,130,150)
+FastStealBtn.TextColor3 = Color3.fromRGB(240,240,245)
+FastStealBtn.Text = "Fast Steal: OFF"
+Instance.new("UICorner", FastStealBtn)
+
+-- Settings Left ── ShiftLock + Fly
+local ShiftLockBtn = Instance.new("TextButton", SettingsLeft)
+ShiftLockBtn.Size = UDim2.new(1,0,0,32)
+ShiftLockBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 75)
+ShiftLockBtn.TextColor3 = Color3.fromRGB(220,220,255)
+ShiftLockBtn.Text = "ShiftLock: OFF"
+Instance.new("UICorner", ShiftLockBtn)
+
+local FlyBtn = Instance.new("TextButton", SettingsLeft)
+FlyBtn.Size = UDim2.new(1,0,0,32)
+FlyBtn.BackgroundColor3 = Color3.fromRGB(80, 200, 120)
+FlyBtn.TextColor3 = Color3.fromRGB(240, 240, 240)
+FlyBtn.Text = "Fly: OFF"
+Instance.new("UICorner", FlyBtn)
+
+-- Connections ── Instant Steal / TP / Noclip / FastSteal
+InstantStealBtn.MouseButton1Click:Connect(doInstantSteal)
+ForwardTPBtn.MouseButton1Click:Connect(doForwardTP)
+TPBaseBtn.MouseButton1Click:Connect(doTPToBase)
+
+NoclipBtn.MouseButton1Click:Connect(function()
+    setNoclip(not noclipEnabled)
+    NoclipBtn.Text = noclipEnabled and "Noclip: ON" or "Noclip: OFF"
+    NoclipBtn.BackgroundColor3 = noclipEnabled and Color3.fromRGB(210,135,255) or Color3.fromRGB(110,95,170)
+end)
+
+FastStealBtn.MouseButton1Click:Connect(function()
+    setFastSteal(not fastStealOn)
+    FastStealBtn.Text = fastStealOn and "Fast Steal: ON" or "Fast Steal: OFF"
+    FastStealBtn.BackgroundColor3 = fastStealOn and Color3.fromRGB(245,175,100) or Color3.fromRGB(140,130,150)
+    FastStealBtn.TextColor3 = fastStealOn and Color3.fromRGB(35,25,15) or Color3.fromRGB(240,240,245)
+end)
+
+-- ShiftLock 按鈕邏輯
+ShiftLockBtn.MouseButton1Click:Connect(function()
+    ShiftLockBtn.Text = "ShiftLock: LOADING..."
+    ShiftLockBtn.BackgroundColor3 = Color3.fromRGB(255, 180, 60)
+
+    local success, err = pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/huangweilunhuangweilun239-alt/all-obfuscated/refs/heads/main/shiftlock", true))()
+    end)
+    
+    if success then
+        shiftLockLoaded = true
+        ShiftLockBtn.Text = "ShiftLock: LOADED (可重載)"
+        ShiftLockBtn.BackgroundColor3 = Color3.fromRGB(90, 140, 255)
+        
+        StarterGui:SetCore("SendNotification", {
+            Title = "Baiyan HUB",
+            Text = "ShiftLock 已載入/重載成功！",
+            Duration = 5
+        })
+    else
+        shiftLockLoaded = false
+        ShiftLockBtn.Text = "ShiftLock: FAILED"
+        ShiftLockBtn.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+        
+        warn("ShiftLock 載入失敗: " .. tostring(err))
+        StarterGui:SetCore("SendNotification", {
+            Title = "ShiftLock 載入失敗",
+            Text = tostring(err) or "未知錯誤",
+            Duration = 6
+        })
+    end
+end)
+
+-- Fly 按鈕邏輯
+FlyBtn.MouseButton1Click:Connect(function()
+    FlyBtn.Text = "Fly: LOADING..."
+    FlyBtn.BackgroundColor3 = Color3.fromRGB(255, 180, 60)
+
+    local success, err = pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/huangweilunhuangweilun239-alt/all-obfuscated/refs/heads/main/FlyGUI", true))()
+    end)
+
+    if success then
+        flyLoaded = true
+        FlyBtn.Text = "Fly: LOADED (可重載)"
+        FlyBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 255)
+        StarterGui:SetCore("SendNotification", {
+            Title = "Baiyan HUB",
+            Text = "Fly 載入/重載成功！",
+            Duration = 5
+        })
+    else
+        flyLoaded = false
+        FlyBtn.Text = "Fly: FAILED"
+        FlyBtn.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+        warn("Fly 載入失敗: " .. tostring(err))
+        StarterGui:SetCore("SendNotification", {
+            Title = "載入失敗",
+            Text = tostring(err) or "未知錯誤",
+            Duration = 7
+        })
+    end
+end)
+
+-- ──────────────────────────────────────────────────────────
+-- RUNTIME UPDATES
+-- ──────────────────────────────────────────────────────────
+
+RunService.RenderStepped:Connect(function()
+    local char = Player.Character if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local bav = hrp and hrp:FindFirstChild("BaiyanSpin")
+
+    if spinning and bav then
+        bav.AngularVelocity = Vector3.new(0, spinSpeed, 0)
+        hum.AutoRotate = false
+    elseif bav then
+        bav.AngularVelocity = Vector3.new(0, 0, 0)
+        hum.AutoRotate = true
+    end
+
+    SpinBtn.Text     = "Spinbot: " .. (spinning       and "ON" or "OFF")
+    SpeedBtn.Text    = "Speed: "    .. (speedEnabled   and "ON" or "OFF")
+    JumpBtn.Text     = "Jump: "     .. (jumpEnabled    and "ON" or "OFF")
+    MegaphoneBtn.Text= "Megaphone: ".. (megaphoneEnabled and "ON" or "OFF")
+    AntiRagBtn.Text  = "Anti-Ragdoll: " .. (antiRagdollEnabled and "ON" or "OFF")
+    
+    if antiRagdollEnabled and hum then
+        hum.PlatformStand = false
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    local char = Player.Character
+    if not char or not speedEnabled then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hrp and hum and hum.MoveDirection.Magnitude > 0 then
+        hrp.Velocity = Vector3.new(hum.MoveDirection.X * targetSpeed, hrp.Velocity.Y, hum.MoveDirection.Z * targetSpeed)
+    end
+end)
+
+-- ──────────────────────────────────────────────────────────
+-- OPEN BUTTON + DRAG
+-- ──────────────────────────────────────────────────────────
+
+local OpenBtn = Instance.new("TextButton", ElevenHub)
+OpenBtn.Size = UDim2.new(0, 120, 0, 35)
+OpenBtn.Position = UDim2.new(0, 20, 0.5, -17)
+OpenBtn.BackgroundColor3 = Color3.fromRGB(80, 150, 255)
+OpenBtn.Text = "Baiyan HUB"
+OpenBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+Instance.new("UICorner", OpenBtn)
+OpenBtn.MouseButton1Click:Connect(function() MainFrame.Visible = not MainFrame.Visible end)
+
+local function MakeDrag(gui)
+    local dragging, dragStart, startPos
+    gui.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = gui.Position
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            gui.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+    end)
+end
+MakeDrag(MainFrame)
+MakeDrag(OpenBtn)
+
+-- Initial notification
+StarterGui:SetCore("SendNotification", {
+    Title = "Baiyan HUB + Insta Steal",
+    Text = "Loaded — ShiftLock & Fly 支援 (可重載)",
+    Duration = 5,
+})
+
+print("Baiyan HUB + tp + insta steal + ShiftLock + Fly loaded")
